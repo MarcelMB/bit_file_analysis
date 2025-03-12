@@ -1,3 +1,6 @@
+import matplotlib.pyplot as plt
+from collections import defaultdict
+
 def reverse_bits(byte):
     """Reverse the bits in a byte"""
     return int(format(byte, "08b")[::-1], 2)
@@ -97,9 +100,9 @@ def analyze_blocks(filename, block_size=512, header_len=384):
                     )
 
 
-def find_preamble_and_header(filename):
+def find_preamble_and_analyze_pixels(filename):
     """
-    Look for all preambles (0x1E6A2C48) and analyze their headers.
+    Look for all preambles (0x1E6A2C48) and analyze their headers and pixel data.
     Using bit-reversed + little-endian interpretation.
     """
     preamble_bits = "00011110011010100010110001001000"
@@ -119,71 +122,118 @@ def find_preamble_and_header(filename):
         "unix_time",
     ]
 
+    # Store pixel data by frame number
+    frame_pixels = defaultdict(list)
+
     with open(filename, "rb") as f:
         data = f.read()
 
     file_size = len(data)
     print(f"File size: {file_size:,} bytes ({file_size / 1024 / 1024:.1f} MB)")
 
-    # First count total preambles
+    # Try both normal and offset-by-1 bit streams
     bit_stream = "".join(format(b, "08b") for b in data)
-    total_count = bit_stream.count(preamble_bits)
-    print(f"\nTotal preambles in file: {total_count}")
+    bit_stream_offset = "0" + bit_stream
 
-    print("\nAnalyzing headers (bit-reversed, little-endian)...")
+    print("\nAnalyzing headers with both bit alignments...")
 
-    # Find all preambles
-    pos = 0
+    # Find preambles in both streams
     count = 0
-    last_pos = None
+    found_positions = []
 
-    while True:
-        pos = bit_stream.find(preamble_bits, pos)
-        if pos == -1:
-            break
+    for stream_idx, stream in enumerate([bit_stream, bit_stream_offset]):
+        pos = 0
+        while True:
+            pos = stream.find(preamble_bits, pos)
+            if pos == -1:
+                break
 
-        byte_pos = pos // 8
-        bit_offset = pos % 8
+            # Adjust byte position based on which stream
+            if stream_idx == 0:
+                byte_pos = pos // 8
+                bit_offset = pos % 8
+            else:
+                byte_pos = (pos - 1) // 8
+                bit_offset = (pos - 1) % 8
 
-        if last_pos is not None:
-            diff = byte_pos - last_pos
-            print(f"Distance from last: {diff} bytes")
-        last_pos = byte_pos
+            if (byte_pos, bit_offset) in found_positions:
+                pos += 1
+                continue
 
-        # Get header data
-        header_start = byte_pos + 4  # Skip preamble
-        header_data = data[header_start : header_start + 48]
-        header_reversed = bytes(reverse_bits(b) for b in header_data)
+            found_positions.append((byte_pos, bit_offset))
 
-        print(
-            f"\nPreamble {count} at byte {byte_pos:,} (0x{byte_pos:08X}), bit offset {bit_offset}"
-        )
+            # Get header data
+            header_start = byte_pos + 4  # Skip preamble
+            header_data = data[header_start : header_start + 48]
+            header_reversed = bytes(reverse_bits(b) for b in header_data)
 
-        # Parse header fields
-        values = {}
-        for idx, field in enumerate(header_fields):
-            word_start = idx * 4
-            word_bytes = header_reversed[word_start : word_start + 4]
-            if len(word_bytes) == 4:
-                value = int.from_bytes(word_bytes, "little")
-                values[field] = value
+            # Parse header fields
+            values = {}
+            for idx, field in enumerate(header_fields):
+                word_start = idx * 4
+                word_bytes = header_reversed[word_start : word_start + 4]
+                if len(word_bytes) == 4:
+                    value = int.from_bytes(word_bytes, "little")
+                    values[field] = value
 
-        # Print key fields
-        print(
-            f"linked_list: {values['linked_list']}, "
-            f"frame_num: {values['frame_num']}, "
-            f"buffer_count: {values['buffer_count']}, "
-            f"frame_buffer_count: {values['frame_buffer_count']}"
-        )
+            # Get pixel data (assuming it starts after header)
+            pixel_start = header_start + 48
+            # Read next 512 bytes of pixel data (adjust size if needed)
+            pixel_data = data[pixel_start : pixel_start + 512]
+            
+            # Find minimum pixel value in this buffer
+            if pixel_data:
+                min_pixel = min(pixel_data)
+                frame_pixels[values['frame_num']].append(min_pixel)
 
-        count += 1
-        pos += 1
+            count += 1
+            pos += 1
 
-        if count >= 20:  # Show first 20 for now
-            print(f"\nShowing first {count} of {total_count} preambles...")
-            break
+    # Calculate minimum pixel value per frame
+    frame_mins = {frame: min(pixels) for frame, pixels in frame_pixels.items()}
 
+    # Print frame number analysis
+    frames = sorted(frame_mins.keys())
+    print("\nFrame number analysis:")
+    print(f"First frame: {frames[0]}")
+    print(f"Last frame: {frames[-1]}")
+    print(f"Number of frames: {len(frames)}")
+    
+    # Check for gaps
+    gaps = []
+    for i in range(len(frames)-1):
+        diff = frames[i+1] - frames[i]
+        if diff > 1:
+            gaps.append((frames[i], frames[i+1], diff))
+    
+    if gaps:
+        print("\nFound gaps in frame numbers:")
+        for start, end, size in gaps:
+            print(f"Gap between frame {start} and {end} (size: {size})")
+    else:
+        print("\nFrames are sequential (no gaps)")
+
+    # Print frames with non-zero min values
+    print("\nFrames with non-zero minimum values:")
+    for frame in frames:
+        if frame_mins[frame] > 0:
+            print(f"Frame {frame}: min={frame_mins[frame]}")
+
+    # Plot results
+    plt.figure(figsize=(12, 6))
+    plt.plot(frames, [frame_mins[f] for f in frames], '-')
+    plt.title('Minimum Pixel Value per Frame')
+    plt.xlabel('Frame Number')
+    plt.ylabel('Minimum Pixel Value')
+    plt.grid(True)
+    plt.savefig('min_pixels_per_frame.png')
+    plt.show()
+    plt.close()
+
+    print("\nAnalysis complete!")
+    print(f"Processed {len(frame_pixels)} unique frames")
+    print(f"Total preambles found: {len(found_positions)}")
 
 if __name__ == "__main__":
     filename = "test_.bin"
-    find_preamble_and_header(filename)
+    find_preamble_and_analyze_pixels(filename)
