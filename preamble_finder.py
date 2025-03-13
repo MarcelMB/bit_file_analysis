@@ -213,6 +213,8 @@ def find_preamble_and_analyze_pixels(filename):
         pixel_start = header_start + 48
         pixel_data = data[pixel_start : pixel_start + 512]
 
+        pixel_data = bytes(reverse_bits(b) for b in pixel_data)
+
         if pixel_data:
             min_pixel = min(pixel_data)
             frame_pixels[values["frame_num"]].append(min_pixel)
