@@ -5,7 +5,7 @@ description = "Default template for PDM package"
 authors = [
     {name = "sneakers-the-rat", email = "sneakers-the-rat@protonmail.com"},
 ]
-dependencies = ["bitstring>=4.3.0", "numpy>=2.2.3", "matplotlib>=3.10.1"]
+dependencies = ["bitstring>=4.3.0", "numpy>=2.2.3", "matplotlib>=3.10.1", "opencv-python>=4.11.0.86", "scikit-video>=1.1.11"]
 requires-python = "==3.13.*"
 readme = "README.md"
 license = {text = "MIT"}

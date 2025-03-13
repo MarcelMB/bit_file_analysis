@@ -1,9 +1,12 @@
 import pdb
 
+import cv2
+import skvideo.io
 from bitstring import BitArray, Bits
 from pathlib import Path
 import numpy as np
 from matplotlib import pyplot as plt
+from skvideo.io import FFmpegWriter
 
 preamble = b'\x124Vx'
 
@@ -68,6 +71,31 @@ def reverse_buffer(arr: np.array) -> np.array:
     arr = arr.view(np.uint8)
     return arr
 
+def split_frames(arr: np.ndarray) -> np.ndarray:
+    # hardcoding bc somehow i forgot how modulo works
+    padded = np.pad(catted, (0, 1644))
+    frame = padded.reshape((-1, 200))
+    frames = np.split(frame, np.arange(200, frame.shape[0], 200))
+    return frames
+
+def write_video(frames):
+    fourcc = cv2.VideoWriter_fourcc(*'Y800')
+    writer = cv2.VideoWriter('test_.avi', fourcc, 30, (200, 200))
+    for frame in frames:
+        frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+        writer.write(frame)
+    writer.release()
+
+def write_video_ffmpeg(frames):
+    writer = FFmpegWriter("test_ffmpeg.avi", outputdict={
+        "-vcodec": "rawvideo",
+        "-f": "avi",
+        "-filter:v": "format=gray"
+    })
+    for frame in frames:
+        writer.writeFrame(frame)
+    writer.close()
+
 
 
 
@@ -88,6 +116,18 @@ if __name__ == "__main__":
 
     catted = np.concat(buffers)
     smalls = catted[catted < 48]
-    plt.hist(smalls, bins=48)
+    # plt.ion()
+    # plt.hist(smalls, bins=48)
+
+    frames = split_frames(catted)
+    write_video(frames)
+    write_video_ffmpeg(frames)
+
+
+
+
+
+
+
 
 
